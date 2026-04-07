@@ -185,7 +185,27 @@ h2 ──── [s1/OVS] ──── h3
 
 # RESULTS:
 
+## 1. Topology.py Output:
+
+Here is the output for topology.py
+
+![Could not display image, please download/check Output_Images Directory properly](/Output_Images/topology_output.png)
+
+This shows us how all connections except h3 -> h1 are working since the firewall blocks that connection:
+
+![Could not display image, please download/check Output_Images Directory properly](/Output_Images/Connection_Table.png)
+
+As visible here, only h3 -> h1 has a "X" mark indicating connection failure and the rest are working.
+This result is correct and shows that the firewall is working properly.
+
+
 ## Performance Analysis
+
+Checking Ping Latency by creating a new h4 node in the network and checking its connection from h1:
+
+![Could not display image, please download/check Output_Images Directory properly](/Output_Images/latency.png)
+
+Latency Check results:
 
 - Ping latency ≈ 29.7 ms  
 - TCP throughput ≈ 7.81 Mbits/sec  
@@ -195,12 +215,26 @@ h2 ──── [s1/OVS] ──── h3
 
 ## Flow Table Analysis
 
-This flow table shows which traffic is blocked
+For the set of commands on mininet CLI:
+
+```bash
+h1 ping -c 3 h2
+h3 ping -c 3 h1
+h2 curl http://10.0.0.1
+h3 iperf -u -c 10.0.0.2 -p 5001
+```
+
+This flow table shows which traffic is blocked:
+
+![Could not display image, please download/check Output_Images Directory properly](/Output_Images/flowtable.png)
 
 ```
-priority=130, icmp, nw_src=10.0.0.3, nw_dst=10.0.0.1 actions=drop
-priority=125, tcp, nw_src=10.0.0.2, nw_dst=10.0.0.1, tp_dst=80 actions=drop
+priority=130, icmp, nw_src=10.0.0.3, nw_dst=10.0.0.1 actions=drop 
+----------> h3 can't ping h1
+priority=125, tcp, nw_src=10.0.0.2, nw_dst=10.0.0.1, tp_dst=80 actions=drop  
+-------> TCP from h2 is blocked -> firewall working correctly
 priority=125, udp, nw_src=10.0.0.3, nw_dst=10.0.0.2, tp_dst=5001 actions=drop
+-------> UDP from h3 is blocked -> firewall working correctly
 ```
 
 ---
@@ -208,11 +242,69 @@ priority=125, udp, nw_src=10.0.0.3, nw_dst=10.0.0.2, tp_dst=5001 actions=drop
 ## Packet-Level Analysis (Wireshark)
 
 - ICMP allowed: request + reply  
-- ICMP blocked: no reply  
-- TCP blocked: SYN retransmissions  
+
+**Command Ran:**
+
+![Could not display image, please download/check Output_Images Directory properly](/Output_Images/h1command.png)
+
+**Wireshark Output:**
+![Could not display image, please download/check Output_Images Directory properly](/Output_Images/h1wireshark.png)
+
+
+- ICMP blocked: no reply (h3 -> h1 icmp blocked)
+
+
+**Command Ran:**
+![Could not display image, please download/check Output_Images Directory properly](/Output_Images/icmpblockcmd.png)
+
+**Wireshark Output**
+![Could not display image, please download/check Output_Images Directory properly](/Output_Images/icmpblockwireshark.png)
+
+Source keeps sending ARP messages and gets wrong/garbled location of h1 as an ARP reply from h3.
+This indicates firewall is blocking the connection properly.
+
+
+- TCP blocked: SYN retransmissions 
+
+
+**Command Ran:**
+![Could not display image, please download/check Output_Images Directory properly](/Output_Images/tcpblockcmd.png)
+
+Command request gets no reply and closes connection upon timeout.
+
+**Wireshark Output**
+![Could not display image, please download/check Output_Images Directory properly](/Output_Images/tcpblockwireshark.png)
+
+Repeatedly Retransmitted SYN messages from the source but none of these packets reach the destination.
+This indicates firewall is blocking the TCP connection properly.
+
+
 - UDP blocked: no response  
 
+
+**Command Ran:**
+![Could not display image, please download/check Output_Images Directory properly](/Output_Images/udpblockcmd.png)
+
+
+**Wireshark Output**
+![Could not display image, please download/check Output_Images Directory properly](/Output_Images/udpblockwireshark.png)
+
 ---
+
+## Automated Testing:
+### 1. Allowed vs blocked:
+
+![Could not display image, please download/check Output_Images Directory properly](/Output_Images/testa.png)
+
+
+
+### 2. Normal vs failure:
+
+![Could not display image, please download/check Output_Images Directory properly](/Output_Images/testb.png)
+
+#### Test Results:
+
+![Could not display image, please download/check Output_Images Directory properly](/Output_Images/testresults.png)
 
 ## System Behavior
 
@@ -225,7 +317,8 @@ priority=125, udp, nw_src=10.0.0.3, nw_dst=10.0.0.2, tp_dst=5001 actions=drop
 ## Conclusion
 
 The SDN firewall successfully demonstrates:
-- Dynamic rule installation  
 - Selective traffic filtering  
 - Efficient switch-level forwarding  
+- Effecting tracking of connection requests and replies through POX
+- Both test scenarios tested and passed.
 
