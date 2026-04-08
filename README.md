@@ -353,7 +353,9 @@ This indicates firewall is blocking the TCP connection properly.
 ---
 
 - MAC Addres Blocked: no response messages
+
 **Command Run**
+
 Router s1 sends Ping requests but gets no replies:
 ![Could not display image, please download/check Output_Images Directory properly](/Output_Images/macblocks1.png)
 
