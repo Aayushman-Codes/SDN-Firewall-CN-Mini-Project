@@ -123,12 +123,42 @@ This does an automatic test and shows which traffic is blocked by the switch and
 
 #### 3.2 Manual Test
 
+##### Allowed traffic
 ```bash
 h1 ping -c 3 h2
+h4 ping -c 3 h1
+h5 ping -c 3 h1
+h6 ping -c 3 h4
+```
+
+##### Blocked traffic (IP rules)
+```bash
 h3 ping -c 3 h1
+h6 ping -c 3 h3
+```
+
+##### Blocked traffic (TCP rule)
+```bash
 h2 curl http://10.0.0.1
+```
+
+##### Blocked traffic (UDP rule)
+```bash
 h3 iperf -u -c 10.0.0.2 -p 5001
 ```
+
+##### Blocked traffic (MAC rule)
+```bash
+h5 ping -c 3 h2
+```
+
+### 4. Full Automated Test:
+
+```bash
+sudo python3 test_firewall.py
+```
+
+This test above runs all the above mentioned tests and much more to validate results. A screenshot of its output has been uploaded in the RESULTS section.
 
 Run these with Wireshwark open in the background to test Results
 
@@ -149,37 +179,35 @@ Run these with Wireshwark open in the background to test Results
 ## Network Topology
 
 ```
-          h1 (10.0.0.1)
-           |
-h2 ──── [s1/OVS] ──── h3
-           |
-          h4 (10.0.0.4)
+h1 (10.0.0.1) ─┐                              ┌─ h3 (10.0.0.3)
+h2 (10.0.0.2) ─┤── [s1] ─── [s2/FW] ─── [s3] ─┤─ h4 (10.0.0.4)
+h5 (10.0.0.5) ─┘                              └─ h6 (10.0.0.6)
 ```
 
+s2 handles all the firewall blocking, while s1 and s3 are peripheral routers with all the ports
 ---
 
 ## Firewall Policy
 
-| Rule | Source | Destination | Protocol | Port | Action |
-|------|--------|-------------|----------|------|--------|
-| 1    | h3     | h1          | All      | -    | DROP   |
-| 2    | h2     | h1          | TCP      | 80   | DROP   |
-| 3    | h3     | h2          | UDP      | 5001 | DROP   |
-| 4    | Any    | Any         | Any      | Any  | ALLOW  |
+| Rule | Type    | Source | Destination | Protocol | Port | Action |
+|------|---------|--------|-------------|----------|------|--------|
+| 1    | IP      | h3     | h1          | All      | -    | DROP   |
+| 2    | IP      | h2     | h1          | TCP      | 80   | DROP   |
+| 3    | IP      | h3     | h2          | UDP      | 5001 | DROP   |
+| 4    | IP      | h6     | h3          | All      | -    | DROP   |
+| 5    | MAC     | h5     | h2          | All      | -    | DROP   |
+| 6    | Default | Any    | Any         | Any      | Any  | ALLOW  |
 
 ---
 
 ## Experimental Validation
 
-### Allowed Traffic
-- h1 → h2 ping ✔  
-- h4 → h1 ping ✔  
-- h1 → h4 TCP ✔  
-
 ### Blocked Traffic
 - h3 → h1 ping ✘  
 - h2 → h1 HTTP ✘  
 - h3 → h2 UDP ✘  
+- h6 → h3 IP ✘
+- h5 → h2 MAC ✘
 
 ---
 
@@ -191,12 +219,22 @@ Here is the output for topology.py
 
 ![Could not display image, please download/check Output_Images Directory properly](/Output_Images/topology_output.png)
 
-This shows us how all connections except h3 -> h1 are working since the firewall blocks that connection:
+**Connection Table:**
 
+![alt text](image.png)
 ![Could not display image, please download/check Output_Images Directory properly](/Output_Images/Connection_Table.png)
 
-As visible here, only h3 -> h1 has a "X" mark indicating connection failure and the rest are working.
-This result is correct and shows that the firewall is working properly.
+Here, we can see that the blockage of pings sent is taking in a two way format instead of the one way format we expected from the Firewall Policy table above. This is infact a Feature and not a Bug with the code. This happens because a "Ping Illusion" is created due to one way blocking of returning response packages explained below:
+
+Below is the reason why ping fails in both directions when we only block ```h3 -> h1```:
+
+- **Test A (h3 ping h1):** Host 3 sends an ICMP Echo Request to Host 1. The firewall sees src=h3, dst=h1, matches your drop rule, and destroys the packet. **Result: Ping fails.**
+
+- **Test B (h1 ping h3):** Host 1 sends an ICMP Echo Request to Host 3. The firewall sees src=h1, dst=h3. There is no rule blocking this, so the packet goes through. Host 3 receives it and generates an ICMP Echo Reply, sending it back to Host 1. However, this reply packet has src=h3, dst=h1. The firewall sees this, matches your drop rule, and destroys the reply packet. **Result: Ping fails.**
+
+So essentially we can clearly see that in each of the cases, the Echo Reply Packets are getting destroyed by the middle s2 router and hence the connection is not going through even though the router blocks only one way traffic. If s1 and s3 were connected directly or through ghost routers, then we would see ```h1 -> h3``` packets being acknowledged in the Connection Table image above since there is no middle router blocking the packet as the very first router that receives the packet from s3 is the destination router s1 itself.
+
+Similar logic applies to the other blocked traffic.
 
 
 ## Performance Analysis
@@ -219,24 +257,42 @@ For the set of commands on mininet CLI:
 
 ```bash
 h1 ping -c 3 h2
+h4 ping -c 3 h1
+h5 ping -c 3 h1
+h6 ping -c 3 h4
+```
+The above commands should go through completely fine
+
+The 5 commands below will be blocked:
+
+```bash
 h3 ping -c 3 h1
+h6 ping -c 3 h3
+```
+
+```bash
 h2 curl http://10.0.0.1
+
 h3 iperf -u -c 10.0.0.2 -p 5001
+
+h5 ping -c 3 h2
 ```
 
 This flow table shows which traffic is blocked:
-
 ![Could not display image, please download/check Output_Images Directory properly](/Output_Images/flowtable.png)
+This screenshot gives us the flow table dump for the project and proves that the project is completely working.
 
 ```
 priority=130, icmp, nw_src=10.0.0.3, nw_dst=10.0.0.1 actions=drop 
 ----------> h3 can't ping h1
+priority=128,ip,nw_src=10.0.0.6,nw_dst=10.0.0.3 actions=drop
 priority=125, tcp, nw_src=10.0.0.2, nw_dst=10.0.0.1, tp_dst=80 actions=drop  
 -------> TCP from h2 is blocked -> firewall working correctly
 priority=125, udp, nw_src=10.0.0.3, nw_dst=10.0.0.2, tp_dst=5001 actions=drop
 -------> UDP from h3 is blocked -> firewall working correctly
+priority=135,dl_src=00:00:00:00:00:05,dl_dst=00:00:00:00:00:02 actions=drop
+-------> MAC address correctly blocked
 ```
-
 ---
 
 ## Packet-Level Analysis (Wireshark)
@@ -258,9 +314,16 @@ priority=125, udp, nw_src=10.0.0.3, nw_dst=10.0.0.2, tp_dst=5001 actions=drop
 ![Could not display image, please download/check Output_Images Directory properly](/Output_Images/icmpblockcmd.png)
 
 **Wireshark Output**
+Sender s1:
 ![Could not display image, please download/check Output_Images Directory properly](/Output_Images/icmpblockwireshark.png)
+Sender keeps sending ICMP messages but gets no responce
+![Could not display image, please download/check Output_Images Directory properly](/Output_Images/icmpblocks2.png)
+S2 receives messages from s1 but never forwards it to s3
+Receiver s3:
+![Could not display image, please download/check Output_Images Directory properly](/Output_Images/icmpblocks3.png)
+Receiver keeps sending ICMP Echo packets but gets no acknowledgement from s1
 
-Source keeps sending ARP messages and gets wrong/garbled location of h1 as an ARP reply from h3.
+Source keeps sending ICMP messages and gets no response.
 This indicates firewall is blocking the connection properly.
 
 
@@ -269,7 +332,6 @@ This indicates firewall is blocking the connection properly.
 
 **Command Ran:**
 ![Could not display image, please download/check Output_Images Directory properly](/Output_Images/tcpblockcmd.png)
-
 Command request gets no reply and closes connection upon timeout.
 
 **Wireshark Output**
@@ -291,19 +353,32 @@ This indicates firewall is blocking the TCP connection properly.
 
 ---
 
+- MAC Addres Blocked: no response messages
+**Command Run**
+Router s1 sends Ping requests but gets no replies:
+![Could not display image, please download/check Output_Images Directory properly](/Output_Images/macblocks1.png)
+
+Router s2 doesnt even process the ICMP replies this time due to MAC address blocking:
+![Could not display image, please download/check Output_Images Directory properly](/Output_Images/macblocks2.png)
+
+Router s3 doesn't receive any Ping request package so no need for it to send Echo Package:
+![Could not display image, please download/check Output_Images Directory properly](/Output_Images/macblocks3.png)
+
+
 ## Automated Testing:
 ### 1. Allowed vs blocked:
-
 ![Could not display image, please download/check Output_Images Directory properly](/Output_Images/testa.png)
 
 
 
 ### 2. Normal vs failure:
+![Could not display image, please download/check Output_Images Directory properly](/Output_Images/testb_1.png)
 
-![Could not display image, please download/check Output_Images Directory properly](/Output_Images/testb.png)
+![Could not display image, please download/check Output_Images Directory properly](/Output_Images/testb_2.png)
+
+
 
 #### Test Results:
-
 ![Could not display image, please download/check Output_Images Directory properly](/Output_Images/testresults.png)
 
 ## System Behavior
