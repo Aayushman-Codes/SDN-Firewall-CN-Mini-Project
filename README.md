@@ -221,7 +221,6 @@ Here is the output for topology.py
 
 **Connection Table:**
 
-![alt text](image.png)
 ![Could not display image, please download/check Output_Images Directory properly](/Output_Images/Connection_Table.png)
 
 Here, we can see that the blockage of pings sent is taking in a two way format instead of the one way format we expected from the Firewall Policy table above. This is infact a Feature and not a Bug with the code. This happens because a "Ping Illusion" is created due to one way blocking of returning response packages explained below:
